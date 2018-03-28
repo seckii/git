@@ -30,6 +30,7 @@
 #endif
 
 static int diff_detect_rename_default;
+static int diff_detect_rename_score_default;
 static int diff_indent_heuristic = 1;
 static int diff_rename_limit_default = 400;
 static int diff_suppress_blank_empty;
@@ -281,6 +282,43 @@ static int parse_color_moved(const char *arg)
 		return error(_("color moved setting must be one of 'no', 'default', 'zebra', 'dimmed_zebra', 'plain'"));
 }
 
+int parse_rename_score(const char **cp_p)
+{
+	unsigned long num, scale;
+	int ch, dot;
+	const char *cp = *cp_p;
+
+	num = 0;
+	scale = 1;
+	dot = 0;
+	for (;;) {
+		ch = *cp;
+		if ( !dot && ch == '.' ) {
+			scale = 1;
+			dot = 1;
+		} else if ( ch == '%' ) {
+			scale = dot ? scale*100 : 100;
+			cp++;	/* % is always at the end */
+			break;
+		} else if ( ch >= '0' && ch <= '9' ) {
+			if ( scale < 100000 ) {
+				scale *= 10;
+				num = (num*10) + (ch-'0');
+			}
+		} else {
+			break;
+		}
+		cp++;
+	}
+	*cp_p = cp;
+
+	/* user says num divided by scale and we say internally that
+	 * is MAX_SCORE * num / scale.
+	 */
+	return (int)((num >= scale) ? MAX_SCORE : (MAX_SCORE * num / scale));
+}
+
+
 int git_diff_ui_config(const char *var, const char *value, void *cb)
 {
 	if (!strcmp(var, "diff.color") || !strcmp(var, "color.diff")) {
@@ -308,6 +346,13 @@ int git_diff_ui_config(const char *var, const char *value, void *cb)
 	}
 	if (!strcmp(var, "diff.renames")) {
 		diff_detect_rename_default = git_config_rename(var, value);
+		return 0;
+	}
+	if (!strcmp(var, "diff.renamescore")) {
+                int parsed_rename_score = parse_rename_score(&value);
+		if (parsed_rename_score == -1)
+			return error("invalid argument to diff.renamescore: %s", value);
+		diff_detect_rename_score_default = parsed_rename_score;
 		return 0;
 	}
 	if (!strcmp(var, "diff.autorefreshindex")) {
@@ -4116,6 +4161,7 @@ void diff_setup(struct diff_options *options)
 	options->add_remove = diff_addremove;
 	options->use_color = diff_use_color_default;
 	options->detect_rename = diff_detect_rename_default;
+        options->rename_score = diff_detect_rename_score_default;
 	options->xdl_opts |= diff_algorithm;
 	if (diff_indent_heuristic)
 		DIFF_XDL_SET(options, INDENT_HEURISTIC);
@@ -4283,8 +4329,6 @@ static int opt_arg(const char *arg, int arg_short, const char *arg_long, int *va
 	}
 	return 1;
 }
-
-static int diff_scoreopt_parse(const char *opt);
 
 static inline int short_opt(char opt, const char **argv,
 			    const char **optarg)
@@ -4527,6 +4571,8 @@ static int parse_objfind_opt(struct diff_options *opt, const char *arg)
 	oidset_insert(opt->objfind, &oid);
 	return 1;
 }
+
+static int diff_scoreopt_parse(const char *opt);
 
 int diff_opt_parse(struct diff_options *options,
 		   const char **av, int ac, const char *prefix)
@@ -4836,42 +4882,6 @@ int diff_opt_parse(struct diff_options *options,
 	} else
 		return 0;
 	return 1;
-}
-
-int parse_rename_score(const char **cp_p)
-{
-	unsigned long num, scale;
-	int ch, dot;
-	const char *cp = *cp_p;
-
-	num = 0;
-	scale = 1;
-	dot = 0;
-	for (;;) {
-		ch = *cp;
-		if ( !dot && ch == '.' ) {
-			scale = 1;
-			dot = 1;
-		} else if ( ch == '%' ) {
-			scale = dot ? scale*100 : 100;
-			cp++;	/* % is always at the end */
-			break;
-		} else if ( ch >= '0' && ch <= '9' ) {
-			if ( scale < 100000 ) {
-				scale *= 10;
-				num = (num*10) + (ch-'0');
-			}
-		} else {
-			break;
-		}
-		cp++;
-	}
-	*cp_p = cp;
-
-	/* user says num divided by scale and we say internally that
-	 * is MAX_SCORE * num / scale.
-	 */
-	return (int)((num >= scale) ? MAX_SCORE : (MAX_SCORE * num / scale));
 }
 
 static int diff_scoreopt_parse(const char *opt)
